@@ -8,20 +8,30 @@ on:
 
 jobs:
   ci:
-    # Two cores, two different questions. `latest` alone cannot tell you whether the
-    # plugin is broken on the Discourse the portals actually run: core drifts, and a
-    # red run there may only mean "will break on upgrade". Conversely a green `latest`
-    # says nothing about the deployed version. So pin the portals' line as well.
+    # Two cores, two different questions. Testing only one of them answers neither
+    # reliably: a red run on a core the portals do not run may only mean "will break
+    # on upgrade", and a green one on a newer core says nothing about the deployed
+    # version. Proven here: the _map spec fixed in 28b1bd5 was red on the dev tip and
+    # green on 2026.4.0, because core changed how group_list settings normalise on
+    # assignment.
     #
-    # Bump `release/2026.4` when the portals are upgraded. Do not use `stable`: that
-    # branch is stranded on 3.5.2, from before Discourse moved to calendar versioning.
+    #   release/2026.4 -- the line the portals are installed on today (2026.4.x).
+    #                     Bump this when they are upgraded.
+    #   beta           -- a TAG Discourse moves with each release (2026.6.0 right now).
+    #                     It is exactly what `version: beta` in the portals' app.yml
+    #                     checks out, so this leg always tests what the next rebuild
+    #                     would actually deploy. Self-updating: no maintenance.
+    #
+    # Note on names: `beta` and `stable` are tags, not branches -- Discourse retired
+    # those branch names. `latest`, `main` and `tests-passed` are all the same dev tip
+    # (2026.7.0 today), which is further out than anything the portals will run soon.
     name: ci (${{ matrix.core_ref }})
     strategy:
       fail-fast: false # one core failing must not cancel the other
       matrix:
         core_ref:
-          - release/2026.4 # what prod and staging run (2026.4.x)
-          - latest # tests-passed tip -- early warning for the next upgrade
+          - release/2026.4 # installed now
+          - beta # what the next rebuild brings
     uses: discourse/.github/.github/workflows/discourse-plugin.yml@v1
     with:
       core_ref: ${{ matrix.core_ref }}

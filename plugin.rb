@@ -4,7 +4,7 @@
 # about: Re-enables Discourse Solved "accept answer" inside private messages, scoped to group inboxes (and optionally 1:1 DMs).
 # version: 0.3.0
 # authors: Wiren Board
-# url: https://github.com/kilpio-wb/wb-allow-solved-pms
+# url: https://github.com/wirenboard/wb-allow-solved-pms
 
 enabled_site_setting :solved_pm_enabled
 

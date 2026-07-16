@@ -1,0 +1,16 @@
+name: Discourse Plugin
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  ci:
+    uses: discourse/.github/.github/workflows/discourse-plugin.yml@v1
+    with:
+      # Ruby-only plugin: there is no package.json / .eslintrc / .prettierrc, and no
+      # .rubocop.yml inheriting from core, so the linting job has nothing to lint and
+      # would fail on the missing configs. Drop this once those configs are added.
+      skip_linting: true

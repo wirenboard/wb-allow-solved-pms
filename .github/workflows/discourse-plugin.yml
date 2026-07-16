@@ -8,8 +8,23 @@ on:
 
 jobs:
   ci:
+    # Two cores, two different questions. `latest` alone cannot tell you whether the
+    # plugin is broken on the Discourse the portals actually run: core drifts, and a
+    # red run there may only mean "will break on upgrade". Conversely a green `latest`
+    # says nothing about the deployed version. So pin the portals' line as well.
+    #
+    # Bump `release/2026.4` when the portals are upgraded. Do not use `stable`: that
+    # branch is stranded on 3.5.2, from before Discourse moved to calendar versioning.
+    name: ci (${{ matrix.core_ref }})
+    strategy:
+      fail-fast: false # one core failing must not cancel the other
+      matrix:
+        core_ref:
+          - release/2026.4 # what prod and staging run (2026.4.x)
+          - latest # tests-passed tip -- early warning for the next upgrade
     uses: discourse/.github/.github/workflows/discourse-plugin.yml@v1
     with:
+      core_ref: ${{ matrix.core_ref }}
       # Ruby-only plugin: there is no package.json / .eslintrc / .prettierrc, and no
       # .rubocop.yml inheriting from core, so the linting job has nothing to lint and
       # would fail on the missing configs. Drop this once those configs are added.

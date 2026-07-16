@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # name: wb-allow-solved-pms
-# about: Re-enables Discourse Solved "accept answer" inside PMs (optionally restricted to group messages).
-# version: 0.2.0
+# about: Re-enables Discourse Solved "accept answer" inside private messages, scoped to group inboxes (and optionally 1:1 DMs).
+# version: 0.3.0
 # authors: Wiren Board
 # url: https://github.com/kilpio-wb/wb-allow-solved-pms
 
@@ -10,84 +10,64 @@ enabled_site_setting :solved_pm_enabled
 
 after_initialize do
   module ::WbAllowSolvedPms
+    PLUGIN_NAME = "wb-allow-solved-pms"
+
+    # Discourse stores `type: group_list` settings as pipe-delimited group **ids** ("1|3|44").
+    # Plugin versions <= 0.2.0 shipped group *names* as settings.yml defaults, so live sites
+    # still hold mixed values such as "support|44|3". Both forms are accepted here.
+    #
+    # Do not replace this with SiteSetting.<name>_map: that is a plain split("|").map(&:to_i),
+    # and "support".to_i == 0 -- group 0 is `everyone`, which would silently grant the setting
+    # to the whole site.
+    def self.setting_entries(value)
+      value.to_s.split("|").map(&:strip).reject(&:empty?)
+    end
+
+    def self.group_ids_from_setting(value)
+      entries = setting_entries(value)
+      return [] if entries.empty?
+
+      ids = entries.grep(/\A\d+\z/).map(&:to_i).select(&:positive?)
+      names = entries.grep_v(/\A\d+\z/)
+      ids |= ::Group.where("lower(name) IN (?)", names.map(&:downcase)).pluck(:id) if names.any?
+      ids.uniq
+    end
+
     module GuardianPatch
+      # Core signature (discourse-solved 2026.4.x): `can_accept_answer?(topic, post)`, and every
+      # caller passes positionally. The keyword form is tolerated too: this method is called once
+      # per post by the post serializer, so an ArgumentError here would 500 whole topic pages.
       def can_accept_answer?(*args, **kwargs)
-        topic = args[0] if args.size > 0
-        post  = args[1] if args.size > 1
+        topic = args[0] || kwargs[:topic]
+        post = args[1] || kwargs[:post]
 
-        if args[0].is_a?(Hash)
-          topic ||= args[0][:topic] || args[0]["topic"]
-          post  ||= args[0][:post]  || args[0]["post"]
-        end
+        # Not ours: hand non-PMs (and unrecognised call shapes) back to core untouched.
+        return super unless topic&.private_message?
 
-        topic ||= kwargs[:topic]
-        post  ||= kwargs[:post]
-
-        # Keep core behavior for non-PMs (and for any unexpected call shapes)
-        unless topic&.private_message?
-          return kwargs.empty? ? super(*args) : super(*args, **kwargs)
-        end
-
-        # Feature gate
         return false unless SiteSetting.solved_enabled
         return false unless SiteSetting.solved_pm_enabled
-
-        # Must have a user + a target post
         return false unless authenticated?
-        return false unless topic && post
+        return false unless post
 
-        # Visibility + basic consistency
         return false unless post.topic_id == topic.id
         return false unless can_see?(topic) && can_see?(post)
 
-        # --- Guardrails (mirror the "safe" parts of core expectations) ---
+        # --- Guardrails: only a real, visible, human reply can become a solution ---
+        return false unless post.post_type == Post.types[:regular]
+        return false if post.post_number.to_i <= 1
+        return false if post.whisper?
+        return false if post.trashed?
+        return false if topic.closed? || topic.archived?
 
-        # Only regular posts (no small-actions, etc.)
-        if post.respond_to?(:post_type) && defined?(::Post) && Post.respond_to?(:types)
-          return false unless post.post_type == Post.types[:regular]
-        end
+        system_user_id = Discourse.system_user&.id
+        return false if system_user_id && post.user_id == system_user_id
 
-        # Never accept the first post as the solution
-        return false if post.respond_to?(:post_number) && post.post_number.to_i == 1
+        return false unless wb_solved_pm_eligible_topic?(topic)
 
-        # No whispers
-        return false if post.respond_to?(:whisper?) && post.whisper?
-
-        # No deleted / trashed posts
-        return false if post.respond_to?(:trashed?) && post.trashed?
-        return false if post.respond_to?(:deleted_at) && post.deleted_at.present?
-
-        # Respect closed/archived PMs (as per your “yes” requirement)
-        return false if topic.respond_to?(:closed?) && topic.closed?
-        return false if topic.respond_to?(:archived?) && topic.archived?
-
-        # Avoid accepting system-user posts (optional but usually desired)
-        if defined?(::Discourse) && Discourse.respond_to?(:system_user) && Discourse.system_user
-          return false if post.respond_to?(:user_id) && post.user_id == Discourse.system_user.id
-        end
-
-        # --- Restrict which PM topics are eligible ---
-
-        allowed_group_ids = solved_pm_topic_allowed_group_ids(topic)
-
-        if solved_pm_target_group_ids.present?
-          # Group inbox PMs only (must match configured target group list)
-          return false if allowed_group_ids.blank?
-          return false if (allowed_group_ids & solved_pm_target_group_ids).blank?
-        else
-          # If no target groups configured:
-          # - allow group inbox PMs always
-          # - allow 1:1 only if setting enabled
-          if allowed_group_ids.blank?
-            return false unless SiteSetting.solved_pm_allow_personal_messages
-            return false unless one_to_one_pm?(topic)
-          end
-        end
-
-        # --- Restrict who can mark solutions ---
-
+        # --- Who may mark the solution ---
         return true if is_staff?
-        return true if solved_pm_actor_group_ids.any? { |gid| user.group_ids.include?(gid) }
+        return true if (wb_solved_pm_setting_groups(:solved_pm_actor_groups)[:ids] &
+          wb_solved_pm_user_group_ids).any?
         return true if SiteSetting.solved_pm_allow_topic_owner && topic.user_id == user.id
 
         false
@@ -95,29 +75,61 @@ after_initialize do
 
       private
 
-      def one_to_one_pm?(topic)
-        # 1:1 PM = no allowed groups AND exactly 2 allowed users
-        return false if TopicAllowedGroup.where(topic_id: topic.id).exists?
+      # A PM is either a *group inbox* message (at least one allowed group) or a *personal*
+      # message (no allowed groups). The two are gated independently:
+      #   group inbox -> solved_pm_target_groups   (empty = every group inbox is eligible)
+      #   personal    -> solved_pm_allow_personal_messages (and strictly 1:1)
+      def wb_solved_pm_eligible_topic?(topic)
+        topic_group_ids = wb_solved_pm_topic_group_ids(topic)
+
+        if topic_group_ids.empty?
+          return false unless SiteSetting.solved_pm_allow_personal_messages
+          return wb_solved_pm_one_to_one?(topic)
+        end
+
+        target = wb_solved_pm_setting_groups(:solved_pm_target_groups)
+        return true unless target[:configured]
+
+        # Configured but unresolvable => ids == [] => nothing intersects => fail closed.
+        (topic_group_ids & target[:ids]).any?
+      end
+
+      # Caller has already established that the topic has no allowed groups.
+      def wb_solved_pm_one_to_one?(topic)
         TopicAllowedUser.where(topic_id: topic.id).count == 2
       end
 
-      def solved_pm_actor_group_ids
-        @solved_pm_actor_group_ids ||= group_ids_from_setting(SiteSetting.solved_pm_actor_groups)
+      def wb_solved_pm_topic_group_ids(topic)
+        @wb_solved_pm_topic_group_ids ||= {}
+        @wb_solved_pm_topic_group_ids[topic.id] ||=
+          TopicAllowedGroup.where(topic_id: topic.id).pluck(:group_id)
       end
 
-      def solved_pm_target_group_ids
-        @solved_pm_target_group_ids ||= group_ids_from_setting(SiteSetting.solved_pm_target_groups)
+      def wb_solved_pm_user_group_ids
+        @wb_solved_pm_user_group_ids ||= user.group_ids
       end
 
-      def solved_pm_topic_allowed_group_ids(topic)
-        @solved_pm_topic_allowed_group_ids ||= {}
-        @solved_pm_topic_allowed_group_ids[topic.id] ||= TopicAllowedGroup.where(topic_id: topic.id).pluck(:group_id)
-      end
+      # Resolved ids for a group_list setting, plus whether the admin configured anything at
+      # all -- "not configured" and "configured but resolves to nothing" must not be conflated.
+      # Memoised per Guardian (one per request) and keyed by the raw value, so a setting change
+      # is never served stale.
+      def wb_solved_pm_setting_groups(setting_name)
+        raw = SiteSetting.public_send(setting_name).to_s
+        cache = (@wb_solved_pm_setting_groups ||= {})
+        cache[[setting_name, raw]] ||= begin
+          entries = ::WbAllowSolvedPms.setting_entries(raw)
+          ids = ::WbAllowSolvedPms.group_ids_from_setting(raw)
 
-      def group_ids_from_setting(value)
-        names = value.to_s.split("|").map(&:strip).reject(&:blank?)
-        return [] if names.blank?
-        Group.where(name: names).pluck(:id)
+          if entries.any? && ids.empty?
+            Rails.logger.warn(
+              "[#{::WbAllowSolvedPms::PLUGIN_NAME}] SiteSetting.#{setting_name} = #{raw.inspect} " \
+                "matches no existing group (expected pipe-delimited group ids). Treating it as a " \
+                "misconfiguration: nothing is granted through this setting.",
+            )
+          end
+
+          { configured: entries.any?, ids: ids }
+        end
       end
     end
   end

@@ -3,18 +3,19 @@ plugins:
     default: false
     client: false
 
-  # Recommended: restrict to your support inbox group(s).
-  # Example: "support|support_lvl2"
+  # Group inboxes whose messages are eligible for Solved.
+  # Discourse stores group_list settings as pipe-delimited group **ids** ("44|45"),
+  # so the default must be empty -- a group name here ends up stored verbatim and
+  # then resolves to nothing (or, via SiteSetting#..._map, to group 0 = everyone).
   solved_pm_target_groups:
     type: group_list
-    default: "support"
+    default: ""
     client: false
 
-  # Who is allowed to accept/unaccept solutions inside eligible PMs.
-  # Example: "staff|support_agents"
+  # Extra groups allowed to mark solutions in eligible PMs. Staff always may.
   solved_pm_actor_groups:
     type: group_list
-    default: "staff"
+    default: ""
     client: false
 
   # Allow the PM topic owner (often the customer) to mark a solution.
@@ -22,7 +23,7 @@ plugins:
     default: true
     client: false
 
-  # If true, enables solution marking even in 1:1 PMs (not just group messages).
+  # Allow Solved in personal (non-group) 1:1 PMs. Independent of solved_pm_target_groups.
   solved_pm_allow_personal_messages:
     default: false
     client: false

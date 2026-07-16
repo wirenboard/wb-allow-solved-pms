@@ -198,8 +198,8 @@ ssh testportal "sudo docker exec app curl -s -o /dev/null -w '%{http_code}\n' ht
 # Permission matrix for wb-allow-solved-pms, run against real staging data.
 #
 # Test data is created with plain ActiveRecord on purpose -- NOT PostCreator --
-# so that no job is ever enqueued (staging has disable_emails=no, and the support
-# group has SMTP; PostAlerter would send real mail to real people).
+# so that no job is ever enqueued: staging has disable_emails=no, and PostAlerter
+# would notify all 74 members of the support group by real e-mail.
 #
 # Idempotent: safe to run repeatedly. Companion cleanup: wb_solved_cleanup.rb
 

@@ -1,7 +1,7 @@
 en:
   site_settings:
-    solved_pm_enabled: "Enable Solved in private messages. When disabled, this plugin blocks 'Mark as Solution' in every private message, including messages core would otherwise allow via allow_solved_in_groups or allow_solved_on_all_topics."
+    solved_pm_enabled: "Enable Solved in personal messages. When disabled, this plugin blocks 'Mark as Solution' in every personal message, including messages core would otherwise allow via allow_solved_in_groups or allow_solved_on_all_topics."
     solved_pm_target_groups: "Group inboxes whose messages are eligible for Solved. Leave empty to make every group message eligible. Has no effect on 1:1 personal messages — those are controlled by solved_pm_allow_personal_messages. If a value is set but matches no existing group, no group message is eligible (the plugin logs a warning)."
-    solved_pm_actor_groups: "Additional groups allowed to mark solutions inside eligible private messages. Staff can always mark solutions regardless of this setting, so this list only ever adds people. Leave empty to allow staff only (plus the topic owner, if solved_pm_allow_topic_owner is enabled)."
-    solved_pm_allow_topic_owner: "Allow the user who started the private message (usually the customer) to mark a solution in it."
-    solved_pm_allow_personal_messages: "Allow Solved in personal (non-group) private messages. Applies only to strictly 1:1 messages between two participants, and works independently of solved_pm_target_groups."
+    solved_pm_actor_groups: "Additional groups allowed to mark solutions inside eligible personal messages. Staff can always mark solutions regardless of this setting, so this list only ever adds people. Leave empty to allow staff only (plus the topic owner, if solved_pm_allow_topic_owner is enabled)."
+    solved_pm_allow_topic_owner: "Allow the user who started the personal message (usually the customer) to mark a solution in it."
+    solved_pm_allow_personal_messages: "Allow Solved in personal (non-group) messages. Applies only to strictly 1:1 messages between two participants, and works independently of solved_pm_target_groups."

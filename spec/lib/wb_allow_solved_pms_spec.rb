@@ -47,16 +47,24 @@ describe WbAllowSolvedPms do
       expect(described_class.group_ids_from_setting("0|#{support.id}")).to eq([support.id])
     end
 
-    it "avoids the SiteSetting#..._map trap that dirty values spring (B3)" do
-      SiteSetting.solved_pm_actor_groups = "support|#{agents.id}"
+    it "resolves the dirty values live sites hold, without emitting everyone (B3)" do
+      # Why the plugin resolves group_list itself instead of using the stock _map helper:
+      # _map is split("|").map(&:to_i), and "support".to_i == 0 -- the `everyone` group.
+      # Production really does hold values like this: 0.2.0 shipped group *names* as
+      # settings.yml defaults, so they sit in the stored value verbatim next to real ids.
+      #
+      # The dirty value is passed in literally rather than through SiteSetting=: newer core
+      # normalises names to ids on assignment, so assigning one cannot reproduce the trap --
+      # and asserting _map's own behaviour here would only pin this spec to a core version.
+      dirty = "support|#{agents.id}"
 
-      # Why the plugin cannot use the stock _map helper: it is split("|").map(&:to_i),
-      # and "support".to_i == 0 -- which is the `everyone` group.
-      expect(SiteSetting.solved_pm_actor_groups_map).to include(Group::AUTO_GROUPS[:everyone])
-
-      expect(
-        described_class.group_ids_from_setting(SiteSetting.solved_pm_actor_groups),
-      ).to contain_exactly(support.id, agents.id)
+      expect(described_class.group_ids_from_setting(dirty)).to contain_exactly(
+        support.id,
+        agents.id,
+      )
+      expect(described_class.group_ids_from_setting(dirty)).not_to include(
+        Group::AUTO_GROUPS[:everyone],
+      )
     end
   end
 end

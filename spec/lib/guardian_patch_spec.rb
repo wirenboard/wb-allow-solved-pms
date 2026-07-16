@@ -259,6 +259,7 @@ describe WbAllowSolvedPms::GuardianPatch do
       expect(Guardian.new(bystander).can_accept_answer?(pm, pm_reply)).to eq(false)
 
       actor_group.add(bystander)
+      bystander.reload
       expect(Guardian.new(bystander).can_accept_answer?(pm, pm_reply)).to eq(true)
     end
 
